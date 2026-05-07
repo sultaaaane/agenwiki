@@ -1,0 +1,10 @@
+# agenwiki
+
+## Step 1 — Get the project
+
+```
+git clone https://github.com/sultaaaane/agenwiki
+cd agenwiki
+pip install --upgrade setuptools
+pip install -e .
+```
