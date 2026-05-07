@@ -129,12 +129,13 @@ See `raw/{fname}`.
 # ─────────────────────────────────────────────
 # 2. LangChain / LangGraph tools
 # ─────────────────────────────────────────────
- 
+
+
 def make_langchain_tools(wiki_path: str | Path) -> list:
     """
     Returns a list of LangChain StructuredTool instances.
     Drop them into create_react_agent, AgentExecutor, or any LC graph.
- 
+
     Usage
     -----
         from agenwiki.tools import make_langchain_tools
@@ -148,33 +149,41 @@ def make_langchain_tools(wiki_path: str | Path) -> list:
         raise ImportError(
             "langchain-core and pydantic are required: pip install langchain-core pydantic"
         ) from e
- 
+
     py_tools = make_python_tools(wiki_path)
- 
+
     class SearchInput(BaseModel):
         query: str = Field(description="Search query string")
         top_k: int = Field(default=8, description="Number of results to return")
- 
+
     class ReadInput(BaseModel):
-        page: str = Field(description="Page path (e.g. 'concepts/attention.md') or slug")
- 
+        page: str = Field(
+            description="Page path (e.g. 'concepts/attention.md') or slug"
+        )
+
     class WriteInput(BaseModel):
         page: str = Field(description="Relative path like 'concepts/attention.md'")
         content: str = Field(description="Full markdown content including frontmatter")
- 
+
     class IngestInput(BaseModel):
         source_text: str = Field(description="Text content of the source document")
         title: str = Field(description="Human-readable title for the source")
-        source_filename: Optional[str] = Field(default=None, description="Optional filename")
- 
+        source_filename: Optional[str] = Field(
+            default=None, description="Optional filename"
+        )
+
     class SubdirInput(BaseModel):
-        subdir: Optional[str] = Field(default=None, description="Subdirectory to filter by")
- 
+        subdir: Optional[str] = Field(
+            default=None, description="Subdirectory to filter by"
+        )
+
     class LogInput(BaseModel):
-        operation: str = Field(description="Operation type, e.g. 'ingest', 'query', 'lint'")
+        operation: str = Field(
+            description="Operation type, e.g. 'ingest', 'query', 'lint'"
+        )
         title: str = Field(description="Short title of the event")
         notes: str = Field(default="", description="Optional notes")
- 
+
     lc_tools = [
         StructuredTool.from_function(
             func=py_tools["wiki_search"],
@@ -224,3 +233,195 @@ def make_langchain_tools(wiki_path: str | Path) -> list:
         ),
     ]
     return lc_tools
+
+
+# ─────────────────────────────────────────────
+# 3. Anthropic (Claude) API tool schemas
+#    Use with client.messages.create(tools=...)
+# ─────────────────────────────────────────────
+
+
+def make_claude_tool_schemas() -> list[dict]:
+    """
+    Returns tool definitions in Anthropic's JSON schema format.
+    Pair with the callables from make_python_tools() to handle tool_use blocks.
+
+    Usage
+    -----
+        schemas = make_claude_tool_schemas()
+        py_tools = make_python_tools("./my-wiki")
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            tools=schemas,
+            messages=[...]
+        )
+
+        # handle tool_use blocks:
+        for block in response.content:
+            if block.type == "tool_use":
+                result = py_tools[block.name](**block.input)
+    """
+    return [
+        {
+            "name": "wiki_search",
+            "description": "Search the persistent wiki for relevant pages. Call this before answering non-trivial questions.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"},
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Max results",
+                        "default": 8,
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+        {
+            "name": "wiki_read",
+            "description": "Read the full content of a wiki page.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "page": {"type": "string", "description": "Page path or slug"},
+                },
+                "required": ["page"],
+            },
+        },
+        {
+            "name": "wiki_write",
+            "description": "Write or update a wiki page with markdown content (include YAML frontmatter).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "string",
+                        "description": "Relative path, e.g. 'concepts/attention.md'",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full markdown content",
+                    },
+                },
+                "required": ["page", "content"],
+            },
+        },
+        {
+            "name": "wiki_ingest",
+            "description": "Save a new source document to the wiki and create a summary stub.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "source_text": {
+                        "type": "string",
+                        "description": "Content of the source",
+                    },
+                    "title": {"type": "string", "description": "Title for the source"},
+                    "source_filename": {
+                        "type": "string",
+                        "description": "Optional filename",
+                    },
+                },
+                "required": ["source_text", "title"],
+            },
+        },
+        {
+            "name": "wiki_lint",
+            "description": "Health-check the wiki for orphan pages and broken links.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "wiki_list_pages",
+            "description": "List all wiki pages with metadata.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "subdir": {
+                        "type": "string",
+                        "description": "Optional subdirectory filter",
+                    },
+                },
+            },
+        },
+        {
+            "name": "wiki_read_index",
+            "description": "Read the master index to find relevant pages.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "wiki_append_log",
+            "description": "Append an event to the wiki log.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string"},
+                    "title": {"type": "string"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["operation", "title"],
+            },
+        },
+    ]
+
+
+# ─────────────────────────────────────────────
+# 4. OpenAI / LiteLLM tool schemas
+# ─────────────────────────────────────────────
+
+
+def make_openai_tool_schemas() -> list[dict]:
+    """
+    Returns tool definitions in OpenAI's function-calling format.
+    Works with LiteLLM, Azure OpenAI, and any OpenAI-compatible API.
+    """
+    claude_schemas = make_claude_tool_schemas()
+    openai_schemas = []
+    for tool in claude_schemas:
+        openai_schemas.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["input_schema"],
+                },
+            }
+        )
+    return openai_schemas
+
+
+# ─────────────────────────────────────────────
+# 5. Generic tool-call dispatcher
+#    Works with any framework: receive a tool name + input dict,
+#    execute it, return a string result.
+# ─────────────────────────────────────────────
+
+
+def make_dispatcher(wiki_path: str | Path) -> Callable[[str, dict], str]:
+    """
+    Returns a single dispatch function: (tool_name, input_dict) -> str result.
+    Use this in your agent loop to handle tool calls uniformly.
+
+    Usage
+    -----
+        dispatch = make_dispatcher("./my-wiki")
+
+        # in your agent loop:
+        for tool_call in response.tool_calls:
+            result = dispatch(tool_call.name, tool_call.input)
+            # feed result back to the model
+    """
+    py_tools = make_python_tools(wiki_path)
+
+    def dispatch(tool_name: str, tool_input: dict) -> str:
+        if tool_name not in py_tools:
+            return f"ERROR: unknown tool {tool_name!r}. Available: {list(py_tools)}"
+        try:
+            result = py_tools[tool_name](**tool_input)
+            return str(result)
+        except Exception as exc:
+            return f"ERROR: {tool_name} failed — {exc}"
+
+    return dispatch
