@@ -96,3 +96,13 @@ assert "PERSISTENT WIKI MEMORY" in prompt
 assert str(root) in prompt
 assert "You are a pirate." in prompt
 print("step 10 ok")
+
+schemas = make_openai_tool_schemas()
+assert schemas[0]["type"] == "function"
+assert "name" in schemas[0]["function"]
+print("step 12 ok")
+
+tools = make_langchain_tools(root)
+assert len(tools) == 8
+assert tools[0].name.startswith("wiki_")
+print("step 13 ok")
