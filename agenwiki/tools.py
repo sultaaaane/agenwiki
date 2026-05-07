@@ -124,3 +124,103 @@ See `raw/{fname}`.
         "wiki_read_index": wiki_read_index,
         "wiki_append_log": wiki_append_log,
     }
+
+
+# ─────────────────────────────────────────────
+# 2. LangChain / LangGraph tools
+# ─────────────────────────────────────────────
+ 
+def make_langchain_tools(wiki_path: str | Path) -> list:
+    """
+    Returns a list of LangChain StructuredTool instances.
+    Drop them into create_react_agent, AgentExecutor, or any LC graph.
+ 
+    Usage
+    -----
+        from agenwiki.tools import make_langchain_tools
+        tools = make_langchain_tools("./my-wiki")
+        agent = create_react_agent(llm, tools)
+    """
+    try:
+        from langchain_core.tools import StructuredTool
+        from pydantic import BaseModel, Field
+    except ImportError as e:
+        raise ImportError(
+            "langchain-core and pydantic are required: pip install langchain-core pydantic"
+        ) from e
+ 
+    py_tools = make_python_tools(wiki_path)
+ 
+    class SearchInput(BaseModel):
+        query: str = Field(description="Search query string")
+        top_k: int = Field(default=8, description="Number of results to return")
+ 
+    class ReadInput(BaseModel):
+        page: str = Field(description="Page path (e.g. 'concepts/attention.md') or slug")
+ 
+    class WriteInput(BaseModel):
+        page: str = Field(description="Relative path like 'concepts/attention.md'")
+        content: str = Field(description="Full markdown content including frontmatter")
+ 
+    class IngestInput(BaseModel):
+        source_text: str = Field(description="Text content of the source document")
+        title: str = Field(description="Human-readable title for the source")
+        source_filename: Optional[str] = Field(default=None, description="Optional filename")
+ 
+    class SubdirInput(BaseModel):
+        subdir: Optional[str] = Field(default=None, description="Subdirectory to filter by")
+ 
+    class LogInput(BaseModel):
+        operation: str = Field(description="Operation type, e.g. 'ingest', 'query', 'lint'")
+        title: str = Field(description="Short title of the event")
+        notes: str = Field(default="", description="Optional notes")
+ 
+    lc_tools = [
+        StructuredTool.from_function(
+            func=py_tools["wiki_search"],
+            name="wiki_search",
+            description="Search the persistent wiki for pages matching a query. Always call this before answering non-trivial questions.",
+            args_schema=SearchInput,
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_read"],
+            name="wiki_read",
+            description="Read the full content of a wiki page by path or slug.",
+            args_schema=ReadInput,
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_write"],
+            name="wiki_write",
+            description="Create or update a wiki page. Include YAML frontmatter. Rebuilds the index automatically.",
+            args_schema=WriteInput,
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_ingest"],
+            name="wiki_ingest",
+            description="Save a new source document and create a wiki stub for it.",
+            args_schema=IngestInput,
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_lint"],
+            name="wiki_lint",
+            description="Health-check the wiki: find orphan pages, broken links, and gaps.",
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_list_pages"],
+            name="wiki_list_pages",
+            description="List all wiki pages with metadata.",
+            args_schema=SubdirInput,
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_read_index"],
+            name="wiki_read_index",
+            description="Read the master wiki index to orient yourself.",
+        ),
+        StructuredTool.from_function(
+            func=py_tools["wiki_append_log"],
+            name="wiki_append_log",
+            description="Append an event to the wiki log.",
+            args_schema=LogInput,
+        ),
+    ]
+    return lc_tools

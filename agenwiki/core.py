@@ -225,6 +225,8 @@ def search_wiki(wiki_root: str | Path, query: str, top_k: int = 8) -> list[dict]
     results = []
 
     for md in root.rglob("*.md"):
+        if md.name in ("index.md", "log.md"):
+            continue
         text = md.read_text()
         text_lower = text.lower()
         score = sum(text_lower.count(t) for t in terms)
