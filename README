@@ -8,3 +8,73 @@ cd agenwiki
 pip install --upgrade setuptools
 pip install -e .
 ```
+
+## Features
+
+- **Persistent Memory:** Give LLM agents long-term memory via a local markdown wiki.
+- **Strict Schema:** Managed directory layout (`raw/`, `wiki/entities/`, `concepts/`, etc.) with YAML frontmatter.
+- **Universal Adapters:** Exposes tools for plain Python, LangChain, Claude API, OpenAI schemas, and an MCP server.
+- **Self-Healing:** Built-in linting to detect orphan pages and broken links.
+
+## Usage
+
+Basic usage in Python:
+
+```python
+from agenwiki.core import init_wiki
+
+# Initialize a new wiki
+wiki_root = init_wiki("./my-wiki")
+```
+
+### Using with LangChain & LangGraph
+
+The library provides a built-in adapter to generate LangChain-compatible structured tools:
+
+```python
+from agenwiki import make_langchain_tools
+from langgraph.prebuilt import create_react_agent
+
+# 1. Create the tools bound to your wiki directory
+tools = make_langchain_tools("./my-wiki")
+
+# 2. Pass them directly to your agent
+agent = create_react_agent(llm, tools)
+```
+
+## Running the MCP Server
+
+You can expose the wiki tools to any MCP-compatible agent (like Claude Desktop) by running the MCP server:
+
+```bash
+agenwiki-mcp --wiki /path/to/my-wiki
+```
+
+## Setting up the MCP Server in VS Code
+
+To use the `agenwiki` tools directly within VS Code via GitHub Copilot (using the Gemini 3 Flash model), you can add the server to your VS Code MCP settings:
+
+1. Locate your VS Code `mcp.json` settings file:
+   - **Linux**: `~/.config/Code/User/mcp.json`
+   - **macOS**: `~/Library/Application Support/Code/User/mcp.json`
+   - **Windows**: `%APPDATA%\Code\User\mcp.json`
+
+2. Add the following entry to the `mcpServers` object, making sure to replace the paths with your absolute local paths:
+
+```json
+{
+  "mcpServers": {
+    "agenwiki": {
+      "command": "/path/to/your/venv/bin/python",
+      "args": ["-m", "agenwiki.mcp_server", "--wiki", "/path/to/your/wiki"]
+    }
+  }
+}
+```
+
+3. Restart your VS Code session or reload the window to activate the tools.
+
+## Upcoming Features
+
+- **Semantic Search:** Replacing basic keyword scoring with an embedding-based search using `sentence-transformers`.
+- **Git-Backed Wiki:** Automatic version control via `git` commits for every agent write operation, providing history and rollback capabilities.
