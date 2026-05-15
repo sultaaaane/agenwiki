@@ -10,10 +10,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+try:
+    from sentence_transformers import SentenceTransformer, util
+
+    _EMBEDDER = None
+except ImportError:
+    SentenceTransformer = None
+    _EMBEDDER = None
 
 # ─────────────────────────────────────────────
 # Wiki initialisation
@@ -173,6 +182,14 @@ def write_page(wiki_root: str | Path, page: str, content: str) -> Path:
     target = root / page
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
+
+    embedder = _get_embedder()
+    if embedder is not None:
+        emb = embedder.encode(content).tolist()
+        emb_target = target.with_suffix(".emb")
+        with open(emb_target, "w") as f:
+            json.dump(emb, f)
+
     return target
 
 
@@ -182,6 +199,9 @@ def delete_page(wiki_root: str | Path, page: str) -> bool:
     target = root / page
     if target.exists():
         target.unlink()
+        emb_target = target.with_suffix(".emb")
+        if emb_target.exists():
+            emb_target.unlink()
         return True
     return False
 
@@ -216,11 +236,44 @@ def list_pages(wiki_root: str | Path, subdir: Optional[str] = None) -> list[dict
 
 def search_wiki(wiki_root: str | Path, query: str, top_k: int = 8) -> list[dict]:
     """
-    Simple keyword search over all wiki pages.
+    Search over all wiki pages. Uses semantic search if embeddings are available,
+    otherwise falls back to BM25-style keyword search.
     Returns ranked list of {path, title, snippet, score}.
-    Uses BM25-style term frequency scoring.
     """
     root = Path(wiki_root) / "wiki"
+    embedder = _get_embedder()
+
+    if embedder is not None:
+        from sentence_transformers import util
+
+        query_emb = embedder.encode(query, convert_to_tensor=True)
+        results = []
+        for md in root.rglob("*.md"):
+            if md.name in ("index.md", "log.md"):
+                continue
+            emb_file = md.with_suffix(".emb")
+            if not emb_file.exists():
+                continue
+            try:
+                with open(emb_file) as f:
+                    doc_emb = json.load(f)
+                sim = util.cos_sim(query_emb, doc_emb).item()
+                text = md.read_text()
+                fm = _parse_frontmatter(text)
+                snippet = text[:200].replace("\n", " ").strip()
+                results.append(
+                    {
+                        "path": str(md.relative_to(root)),
+                        "title": fm.get("title", md.stem),
+                        "score": sim,
+                        "snippet": snippet,
+                    }
+                )
+            except Exception:
+                pass
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results[:top_k]
+
     terms = re.findall(r"\w+", query.lower())
     results = []
 
@@ -420,3 +473,26 @@ def _parse_frontmatter(text: str) -> dict:
             val = [v.strip().strip("\"'") for v in val[1:-1].split(",") if v.strip()]
         result[key] = val
     return result
+
+
+def _get_embedder():
+    global _EMBEDDER
+    if SentenceTransformer is not None and _EMBEDDER is None:
+        _EMBEDDER = SentenceTransformer("all-MiniLM-L6-v2")
+    return _EMBEDDER
+
+
+def git_commit(wiki_root: str | Path, message: str = "wiki update") -> None:
+    """Commit all changes in the wiki directory to git."""
+    root = str(wiki_root)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-m", message], cwd=root, check=True)
+
+
+def git_diff(wiki_root: str | Path) -> str:
+    """Return the git diff for the last commit."""
+    root = str(wiki_root)
+    result = subprocess.run(
+        ["git", "diff", "HEAD~1"], cwd=root, capture_output=True, text=True
+    )
+    return result.stdout

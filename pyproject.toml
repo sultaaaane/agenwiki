@@ -10,3 +10,6 @@ dependencies = []
 
 [project.scripts]
 agenwiki-mcp = "agenwiki.mcp_server:main"
+
+[project.optional-dependencies]
+embeddings = ["sentence-transformers>=2.0"]
